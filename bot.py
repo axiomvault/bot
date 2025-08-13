@@ -1,73 +1,93 @@
 import logging
-from telegram import Update, ChatPermissions, InputFile
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
+import os
 from flask import Flask, request
-import threading
-import asyncio
+from telegram import Update, ChatPermissions
+from telegram.ext import Application
 
+# ========================
+# CONFIG (Hardcoded)
+# ========================
 BOT_TOKEN = "8446918873:AAE3RUOqs__DoCQnwil85shVozugodVyk_I"
-GROUP_ID = -1002463051483
 WEBHOOK_URL = f"https://worker-production-ce19.up.railway.app/{BOT_TOKEN}"
-PORT = 8080
+FLYER1 = "https://yourdomain.com/flyer1.jpg"
+FLYER2 = "https://yourdomain.com/flyer2.jpg"
 
-FLYER1_PATH = "flyer1.jpg"
-FLYER2_PATH = "flyer2.jpg"
+# ========================
+# Logging
+# ========================
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
 
-logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO)
+# ========================
+# Telegram Bot App
+# ========================
+app_bot = Application.builder().token(BOT_TOKEN).build()
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("🚀 Welcome to Axiom Community Vault — Let's grow together!")
+async def welcome_new_member(update: Update, context):
+    """Handle new members joining the group"""
+    if update.message and update.message.new_chat_members:
+        for member in update.message.new_chat_members:
+            chat_id = update.message.chat_id
 
-async def welcome_new_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    for member in update.message.new_chat_members:
-        if member.id != context.bot.id:
+            # Remove permissions
+            await context.bot.restrict_chat_member(
+                chat_id=chat_id,
+                user_id=member.id,
+                permissions=ChatPermissions(
+                    can_send_messages=False,
+                    can_send_media_messages=False,
+                    can_pin_messages=False
+                )
+            )
+
+            # Send DM with flyers
             try:
-                # Send DM
                 await context.bot.send_message(
                     chat_id=member.id,
-                    text=f"🎉 Welcome {member.full_name} to Axiom Community Vault!\nWe’re excited to have you onboard."
+                    text=f"👋 Welcome {member.full_name} to our community!"
                 )
-                await context.bot.send_photo(chat_id=member.id, photo=InputFile(FLYER1_PATH))
-                await context.bot.send_photo(chat_id=member.id, photo=InputFile(FLYER2_PATH))
-
-                # Restrict in group
-                await context.bot.restrict_chat_member(
-                    chat_id=GROUP_ID,
-                    user_id=member.id,
-                    permissions=ChatPermissions(can_send_messages=False,
-                                                can_send_media_messages=False,
-                                                can_pin_messages=False)
-                )
-
-                # Delete join message
-                await context.bot.delete_message(chat_id=GROUP_ID, message_id=update.message.message_id)
-
-                logging.info(f"✅ Welcome flow completed for {member.full_name}")
+                await context.bot.send_photo(chat_id=member.id, photo=FLYER1)
+                await context.bot.send_photo(chat_id=member.id, photo=FLYER2)
             except Exception as e:
-                logging.error(f"⚠️ Error handling new member {member.full_name}: {e}")
+                logger.warning(f"Could not send DM to {member.id}: {e}")
 
+            # Delete join message from group
+            try:
+                await update.message.delete()
+            except Exception as e:
+                logger.warning(f"Could not delete join message: {e}")
+
+# Register handler
+app_bot.add_handler(
+    app_bot.chat_member_handler(welcome_new_member, allowed_updates=["message"])
+)
+
+# ========================
+# Flask Web App
+# ========================
 flask_app = Flask(__name__)
-app_bot = None
 
 @flask_app.route(f"/{BOT_TOKEN}", methods=["POST"])
 def webhook():
-    json_update = request.get_json(force=True)
-    update = Update.de_json(json_update, app_bot.bot)
-    asyncio.run_coroutine_threadsafe(app_bot.process_update(update), app_bot.loop)
+    """Webhook endpoint for Telegram"""
+    update = Update.de_json(request.get_json(force=True), app_bot.bot)
+    app_bot.create_task(app_bot.process_update(update))
     return "OK", 200
 
 @flask_app.route("/", methods=["GET"])
 def home():
-    return "🤖 Axiom Community Vault Bot is running!", 200
+    return "🤖 Axiom Community Vault Bot is running!"
 
-async def run_bot():
-    global app_bot
-    app_bot = ApplicationBuilder().token(BOT_TOKEN).build()
-    app_bot.add_handler(CommandHandler("start", start))
-    app_bot.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, welcome_new_member))
-    await app_bot.bot.set_webhook(WEBHOOK_URL)
-    logging.info(f"✅ Webhook set to: {WEBHOOK_URL}")
+# ========================
+# Set Webhook on startup
+# ========================
+async def set_webhook():
+    await app_bot.bot.set_webhook(WEBHOOK_URL, allowed_updates=["message", "chat_member"])
 
 if __name__ == "__main__":
-    threading.Thread(target=lambda: flask_app.run(host="0.0.0.0", port=PORT)).start()
-    asyncio.run(run_bot())
+    import asyncio
+    asyncio.get_event_loop().run_until_complete(set_webhook())
+    flask_app.run(host="0.0.0.0", port=8080)
