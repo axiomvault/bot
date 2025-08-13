@@ -6,7 +6,7 @@ import threading
 import asyncio
 
 # --- CONFIG ---
-BOT_TOKEN = "YOUR_BOT_TOKEN_HERE"  # Put your bot token here
+BOT_TOKEN = "8446918873:AAE3RUOqs__DoCQnwil85shVozugodVyk_I"  # Put your bot token here
 GROUP_ID = -1002463051483  # Your group ID
 WEBHOOK_URL = f"https://worker-production-ce19.up.railway.app/{BOT_TOKEN}"  # Hardcoded Railway URL
 PORT = 8080  # Railway's default port
